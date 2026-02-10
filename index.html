@@ -3,11 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1220" />
+  <meta name="theme-color" content="#070A12" />
   <title>Demumu / Are You Dead? - Safety Check-in</title>
+
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./styles.css" />
 </head>
+
 <body>
   <div class="bg"></div>
 
@@ -87,7 +89,7 @@
         <label class="field gridSpan2">
           <span class="label">通知先（メール）※複数可</span>
           <textarea id="obContacts" rows="4" placeholder="1行に1件：&#10;family1@example.com&#10;family2@example.com"></textarea>
-          <span class="hint">※このアプリ単体では送信できないため、通知は mailto / Webhook で実行します</span>
+          <span class="hint">※この静的版は mailto / Webhook で通知を実行します</span>
         </label>
       </div>
 
@@ -103,6 +105,7 @@
           <span class="dot" id="statusDot" aria-hidden="true"></span>
           <span id="statusLabel">—</span>
         </div>
+
         <div class="kpi">
           <div class="kpiItem">
             <div class="kpiLabel">最終チェックイン</div>
@@ -118,9 +121,7 @@
       <div class="hero">
         <div class="heroLeft">
           <h2 class="h2">今日のチェックイン</h2>
-          <p class="muted" id="homeHint">
-            いつ押してもOK。押されない場合のみ通知が走ります。
-          </p>
+          <p class="muted" id="homeHint">—</p>
 
           <button id="btnCheckin" class="checkinBtn" type="button">
             <span class="checkinIcon" aria-hidden="true">🖐️</span>
@@ -153,7 +154,7 @@
                 <span class="tag" id="tagWebhook">Webhook：未設定</span>
               </div>
               <div class="muted small">
-                ※本番運用はサーバ側でメール送信を推奨（この静的版は “通知のトリガ” を再現）
+                ※本番運用はサーバ側でメール送信推奨（この静的版は “通知トリガ” を再現）
               </div>
             </div>
           </div>
@@ -279,7 +280,7 @@
           <div class="sheetActions">
             <button id="btnSheetCheckin" class="btn primary" type="button">無事です（押す）</button>
             <button id="btnSheetMail" class="btn" type="button">メールを作成</button>
-            <button id="btnSheetWebhook" class="btn" type="button">Webhook送信</button>
+            <button id="btnSheetWebhook" class="btn ghost" type="button">Webhook送信</button>
           </div>
 
           <div class="muted small" id="sheetMeta">—</div>
