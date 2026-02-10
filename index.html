@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>Demumu / Are You Dead? - Safety Check-in</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">🐼</div>
+      <div class="brandText">
+        <div class="brandTitle">Demumu</div>
+        <div class="brandSub">Are You Dead? / 安否チェック</div>
+      </div>
+    </div>
+
+    <div class="topActions">
+      <button id="btnTheme" class="iconBtn" type="button" title="テーマ切替" aria-label="テーマ切替">
+        <span aria-hidden="true">🌓</span>
+      </button>
+      <button id="btnSettings" class="iconBtn" type="button" title="設定" aria-label="設定">
+        <span aria-hidden="true">⚙</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell" id="appRoot">
+    <!-- Onboarding -->
+    <section class="card" id="viewOnboarding" hidden>
+      <div class="cardHeader">
+        <h1 class="h1">押すだけで、安心を残す。</h1>
+        <p class="muted">
+          このアプリは <b>毎日1回のチェックイン</b> だけを記録し、<b>押されない時だけ</b> 連絡先へ通知します。<br/>
+          位置情報・常時監視はしません。
+        </p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="stepNum">1</div>
+          <div class="stepBody">
+            <div class="stepTitle">連絡先を登録</div>
+            <div class="muted">通知先（メール）を登録します。あとで変更できます。</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="stepNum">2</div>
+          <div class="stepBody">
+            <div class="stepTitle">通知条件を設定</div>
+            <div class="muted">未チェックインが一定時間続いたら通知。</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="stepNum">3</div>
+          <div class="stepBody">
+            <div class="stepTitle">あとは押すだけ</div>
+            <div class="muted">毎日いつでもOK。押す時間帯の指定はありません。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="grid2">
+        <label class="field">
+          <span class="label">本人の表示名（任意）</span>
+          <input id="obName" type="text" placeholder="例：おばあちゃん / Naka" autocomplete="name" />
+          <span class="hint">※通知文にも使われます</span>
+        </label>
+
+        <label class="field">
+          <span class="label">通知までの時間</span>
+          <select id="obThreshold">
+            <option value="24">24時間（推奨）</option>
+            <option value="12">12時間</option>
+            <option value="48">48時間</option>
+          </select>
+          <span class="hint">※Demumu系の基本は “24h”</span>
+        </label>
+
+        <label class="field gridSpan2">
+          <span class="label">通知先（メール）※複数可</span>
+          <textarea id="obContacts" rows="4" placeholder="1行に1件：&#10;family1@example.com&#10;family2@example.com"></textarea>
+          <span class="hint">※このアプリ単体では送信できないため、通知は mailto / Webhook で実行します</span>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="obStart" class="btn primary" type="button">はじめる</button>
+      </div>
+    </section>
+
+    <!-- Home -->
+    <section class="card" id="viewHome" hidden>
+      <div class="homeTop">
+        <div class="statusPill" id="statusPill" role="status" aria-live="polite">
+          <span class="dot" id="statusDot" aria-hidden="true"></span>
+          <span id="statusLabel">—</span>
+        </div>
+        <div class="kpi">
+          <div class="kpiItem">
+            <div class="kpiLabel">最終チェックイン</div>
+            <div class="kpiValue" id="lastCheckin">—</div>
+          </div>
+          <div class="kpiItem">
+            <div class="kpiLabel">経過</div>
+            <div class="kpiValue" id="elapsed">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero">
+        <div class="heroLeft">
+          <h2 class="h2">今日のチェックイン</h2>
+          <p class="muted" id="homeHint">
+            いつ押してもOK。押されない場合のみ通知が走ります。
+          </p>
+
+          <button id="btnCheckin" class="checkinBtn" type="button">
+            <span class="checkinIcon" aria-hidden="true">🖐️</span>
+            <span class="checkinText">
+              <span class="checkinTitle">いま押す</span>
+              <span class="checkinSub">（生存チェック）</span>
+            </span>
+          </button>
+
+          <div class="miniRow">
+            <button id="btnHistory" class="btn ghost" type="button">通知履歴</button>
+            <button id="btnTestNotify" class="btn ghost" type="button">テスト通知</button>
+          </div>
+        </div>
+
+        <div class="heroRight">
+          <div class="miniCard">
+            <div class="miniTitle">通知先</div>
+            <div class="miniBody">
+              <div class="chips" id="contactChips"></div>
+              <div class="muted small" id="contactHint"></div>
+            </div>
+          </div>
+
+          <div class="miniCard">
+            <div class="miniTitle">通知方法</div>
+            <div class="miniBody">
+              <div class="row">
+                <span class="tag">メール：mailto</span>
+                <span class="tag" id="tagWebhook">Webhook：未設定</span>
+              </div>
+              <div class="muted small">
+                ※本番運用はサーバ側でメール送信を推奨（この静的版は “通知のトリガ” を再現）
+              </div>
+            </div>
+          </div>
+
+          <div class="miniCard">
+            <div class="miniTitle">ロック機能（Pro想定）</div>
+            <div class="miniBody">
+              <div class="row">
+                <span class="tag lock">⏰ 時間帯指定</span>
+                <span class="tag lock">📱 SMS</span>
+                <span class="tag lock">👪 複数ユーザー管理</span>
+              </div>
+              <div class="muted small">UIのみ（忠実再現：課金要素としてロック表示）</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <details class="logBox">
+        <summary>イベントログ</summary>
+        <pre id="log" class="log"></pre>
+      </details>
+    </section>
+
+    <!-- History -->
+    <section class="card" id="viewHistory" hidden>
+      <div class="cardHeader rowBetween">
+        <div>
+          <h2 class="h2">通知履歴</h2>
+          <p class="muted">警告・通知・復旧の履歴（ローカル保存）</p>
+        </div>
+        <button id="btnBackFromHistory" class="btn ghost" type="button">戻る</button>
+      </div>
+
+      <div class="list" id="historyList"></div>
+
+      <div class="actions">
+        <button id="btnClearHistory" class="btn danger" type="button">履歴を消去</button>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="card" id="viewSettings" hidden>
+      <div class="cardHeader rowBetween">
+        <div>
+          <h2 class="h2">設定</h2>
+          <p class="muted">通知条件・通知先の管理</p>
+        </div>
+        <button id="btnCloseSettings" class="btn ghost" type="button">閉じる</button>
+      </div>
+
+      <div class="grid2">
+        <label class="field">
+          <span class="label">本人の表示名</span>
+          <input id="stName" type="text" placeholder="例：おばあちゃん / Naka" autocomplete="name" />
+        </label>
+
+        <label class="field">
+          <span class="label">通知までの時間</span>
+          <select id="stThreshold">
+            <option value="12">12時間</option>
+            <option value="24">24時間（推奨）</option>
+            <option value="48">48時間</option>
+          </select>
+          <span class="hint">通知は「警告 → 通知」の2段階で抑制します</span>
+        </label>
+
+        <label class="field gridSpan2">
+          <span class="label">通知先（メール）※複数可</span>
+          <textarea id="stContacts" rows="4" placeholder="1行に1件：&#10;family1@example.com"></textarea>
+          <span class="hint">通知が必要なとき、ワンタップで mailto を起動できます</span>
+        </label>
+
+        <label class="field gridSpan2">
+          <span class="label">任意Webhook（通知時にPOST）</span>
+          <input id="stWebhook" type="url" placeholder="例：https://maker.ifttt.com/trigger/.../with/key/..." />
+          <span class="hint">CORSや受信設定次第で失敗することがあります（失敗時はログに記録）</span>
+        </label>
+
+        <div class="field gridSpan2">
+          <span class="label">ブラウザ通知</span>
+          <div class="rowBetween">
+            <div class="muted">通知を許可すると「警告/通知」のポップアップが表示できます</div>
+            <button id="btnEnableNoti" class="btn" type="button">許可する</button>
+          </div>
+          <div class="muted small" id="notiState">—</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="actions rowWrap">
+        <button id="btnExport" class="btn" type="button">設定をエクスポート</button>
+        <label class="btn fileBtn">
+          設定をインポート
+          <input id="fileImport" type="file" accept="application/json" hidden>
+        </label>
+        <button id="btnResetAll" class="btn danger" type="button">全リセット</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="actions">
+        <a class="link" href="https://apps.apple.com/jp/app/demumu-are-you-dead/id6745099872" target="_blank" rel="noreferrer">
+          参照：App Store（原典）
+        </a>
+      </div>
+    </section>
+
+    <!-- Alert Sheet -->
+    <section class="sheet" id="alertSheet" hidden aria-live="assertive">
+      <div class="sheetCard" role="dialog" aria-modal="true" aria-label="通知">
+        <div class="sheetHeader">
+          <div class="sheetTitle" id="sheetTitle">—</div>
+          <button id="btnCloseSheet" class="iconBtn" type="button" aria-label="閉じる" title="閉じる">✕</button>
+        </div>
+
+        <div class="sheetBody">
+          <div class="sheetMsg" id="sheetMsg">—</div>
+
+          <div class="sheetActions">
+            <button id="btnSheetCheckin" class="btn primary" type="button">無事です（押す）</button>
+            <button id="btnSheetMail" class="btn" type="button">メールを作成</button>
+            <button id="btnSheetWebhook" class="btn" type="button">Webhook送信</button>
+          </div>
+
+          <div class="muted small" id="sheetMeta">—</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="muted small">Static Demo for GitHub Pages • ローカル保存のみ • 医療/緊急通報の代替ではありません</span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
