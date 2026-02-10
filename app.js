@@ -440,4 +440,242 @@ function escapeHtml(s){
 function syncSettingsUI(profile){
   // Onboarding
   if($("obName")) $("obName").value = profile.name || "";
-  if(
+  if($("obThreshold")) $("obThreshold").value = String(profile.thresholdHours || 24);
+  if($("obContacts")) $("obContacts").value = profile.contactsText || "";
+
+  // Settings
+  $("stName").value = profile.name || "";
+  $("stThreshold").value = String(profile.thresholdHours || 24);
+  $("stContacts").value = profile.contactsText || "";
+  $("stWebhook").value = profile.webhookUrl || "";
+
+  // Notifications state
+  updateNotiState();
+}
+
+function updateNotiState(){
+  const el = $("notiState");
+  if(!("Notification" in window)){
+    el.textContent = "このブラウザは通知に対応していません。";
+    $("btnEnableNoti").disabled = true;
+    return;
+  }
+  el.textContent = `通知権限：${Notification.permission}`;
+}
+
+function exportSettings(profile){
+  const data = {
+    exportedAt: new Date().toISOString(),
+    profile: {
+      name: profile.name || "",
+      thresholdHours: Number(profile.thresholdHours || 24),
+      contactsText: profile.contactsText || "",
+      webhookUrl: profile.webhookUrl || "",
+    }
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "demumu-settings.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  addHistory("export", "設定をエクスポート");
+  log("⬇ 設定をエクスポートしました");
+}
+
+async function importSettings(file){
+  const txt = await file.text();
+  const obj = JSON.parse(txt);
+  const p = getProfile();
+  const np = obj?.profile || {};
+  p.name = String(np.name || "");
+  p.thresholdHours = Number(np.thresholdHours || 24);
+  p.contactsText = String(np.contactsText || "");
+  p.webhookUrl = String(np.webhookUrl || "");
+  setProfile(p);
+  addHistory("import", "設定をインポート");
+  log("⬆ 設定をインポートしました");
+  return p;
+}
+
+// --- App init / wiring
+function init(){
+  initTheme();
+
+  const btnTheme = $("btnTheme");
+  btnTheme.addEventListener("click", () => {
+    const cur = document.documentElement.dataset.theme || "dark";
+    setTheme(cur === "dark" ? "light" : "dark");
+  });
+
+  let profile = getProfile();
+
+  // First route
+  if(!isConfigured(profile)){
+    route("onboarding");
+  }else{
+    route("home");
+  }
+
+  syncSettingsUI(profile);
+  applyStatusToHome(profile);
+
+  // Top settings open
+  $("btnSettings").addEventListener("click", () => {
+    profile = getProfile();
+    syncSettingsUI(profile);
+    route("settings");
+  });
+
+  // Onboarding start
+  $("obStart").addEventListener("click", () => {
+    profile.name = $("obName").value.trim();
+    profile.thresholdHours = Number($("obThreshold").value || 24);
+    profile.contactsText = $("obContacts").value;
+    setProfile(profile);
+    addHistory("setup", "初期設定完了", { thresholdHours: profile.thresholdHours });
+    log("✨ 初期設定を完了しました");
+    route("home");
+    applyStatusToHome(profile);
+  });
+
+  // Home actions
+  $("btnCheckin").addEventListener("click", () => {
+    profile = getProfile();
+    doCheckin(profile);
+  });
+
+  $("btnHistory").addEventListener("click", () => {
+    renderHistory();
+    route("history");
+  });
+
+  $("btnBackFromHistory").addEventListener("click", () => {
+    profile = getProfile();
+    route("home");
+    applyStatusToHome(profile);
+  });
+
+  $("btnClearHistory").addEventListener("click", () => {
+    saveJson(STORE.history, []);
+    log("🧹 履歴を消去しました");
+    renderHistory();
+  });
+
+  $("btnTestNotify").addEventListener("click", async () => {
+    profile = getProfile();
+    openSheet({
+      title: "テスト通知",
+      msg: "通知の動作確認です。mail/ webhook を試せます。",
+      meta: "",
+      showWebhook: Boolean(profile.webhookUrl?.trim())
+    });
+  });
+
+  // Settings close
+  $("btnCloseSettings").addEventListener("click", () => {
+    profile = getProfile();
+    route(isConfigured(profile) ? "home" : "onboarding");
+    applyStatusToHome(profile);
+  });
+
+  // Settings inputs
+  const saveSettings = () => {
+    const p = getProfile();
+    p.name = $("stName").value.trim();
+    p.thresholdHours = Number($("stThreshold").value || 24);
+    p.contactsText = $("stContacts").value;
+    p.webhookUrl = $("stWebhook").value.trim();
+    setProfile(p);
+    applyStatusToHome(p);
+    return p;
+  };
+
+  ["stName","stThreshold","stContacts","stWebhook"].forEach(id=>{
+    $(id).addEventListener("input", () => {
+      profile = saveSettings();
+    });
+    $(id).addEventListener("change", () => {
+      profile = saveSettings();
+    });
+  });
+
+  $("btnEnableNoti").addEventListener("click", async () => {
+    if(!("Notification" in window)) return;
+    const perm = await Notification.requestPermission();
+    addHistory("noti", "通知権限変更", { permission: perm });
+    log(`🔔 通知権限：${perm}`);
+    updateNotiState();
+  });
+
+  $("btnExport").addEventListener("click", () => {
+    profile = getProfile();
+    exportSettings(profile);
+  });
+
+  $("fileImport").addEventListener("change", async (e) => {
+    const f = e.target.files?.[0];
+    if(!f) return;
+    profile = await importSettings(f);
+    syncSettingsUI(profile);
+    route("home");
+    applyStatusToHome(profile);
+    e.target.value = "";
+  });
+
+  $("btnResetAll").addEventListener("click", () => {
+    if(!confirm("全てのデータ（設定・履歴・チェックイン）を削除します。よろしいですか？")) return;
+    localStorage.removeItem(STORE.profile);
+    localStorage.removeItem(STORE.history);
+    addHistory("reset", "全リセット");
+    log("🧹 全リセットしました");
+    profile = getProfile();
+    syncSettingsUI(profile);
+    route("onboarding");
+  });
+
+  // Alert sheet actions
+  sheet.close.addEventListener("click", closeSheet);
+
+  sheet.checkin.addEventListener("click", () => {
+    profile = getProfile();
+    doCheckin(profile);
+    closeSheet();
+  });
+
+  sheet.mail.addEventListener("click", () => {
+    profile = getProfile();
+    mailtoAll(profile, "アプリ内トリガ（警告/通知/テスト）");
+  });
+
+  sheet.webhook.addEventListener("click", async () => {
+    profile = getProfile();
+    await postWebhook(profile, "アプリ内トリガ（警告/通知/テスト）");
+  });
+
+  // Escape closes sheet
+  window.addEventListener("keydown", (e) => {
+    if(e.key === "Escape" && !sheet.root.hidden) closeSheet();
+  });
+
+  // Periodic monitor while app is open
+  setInterval(() => {
+    const p = getProfile();
+    maybeFireWarningOrAlert(p);
+    applyStatusToHome(p);
+  }, 30_000); // 30 sec
+
+  // Initial monitor + status
+  setTimeout(() => {
+    const p = getProfile();
+    maybeFireWarningOrAlert(p);
+    applyStatusToHome(p);
+  }, 900);
+
+  // If user hasn't checked in yet, keep a gentle prompt in log
+  if(!profile.lastCheckinAt){
+    log("ℹ 最初のチェックインをしてください。以後、押されない場合のみ通知が走ります。");
+  }
+}
+
+document.addEventListener("DOMContentLoaded", init);
