@@ -1,10 +1,10 @@
 /* Demumu-like Safety Check-in (Static SPA for GitHub Pages)
    - No real email sending (static). Uses mailto + optional webhook POST.
    - Stores everything in localStorage.
+   - Defensive event binding (won't crash if an element id is missing).
 */
 
 const STORE = {
-  version: "demumu_v1",
   theme: "demumu_theme",
   profile: "demumu_profile",
   history: "demumu_history",
@@ -16,16 +16,24 @@ const DEFAULTS = {
     thresholdHours: 24,
     contactsText: "",
     webhookUrl: "",
-    lastCheckinAt: null,      // ms epoch
-    lastWarnAt: null,         // ms epoch (warning shown)
-    lastAlertAt: null,        // ms epoch (alert triggered)
+    lastCheckinAt: null, // ms epoch
+    lastWarnAt: null,    // ms epoch
+    lastAlertAt: null,   // ms epoch
   }
 };
 
-// --- DOM helpers
+// DOM helpers
 const $ = (id) => document.getElementById(id);
-const show = (el) => { el.hidden = false; };
-const hide = (el) => { el.hidden = true; };
+const show = (el) => { if(el) el.hidden = false; };
+const hide = (el) => { if(el) el.hidden = true; };
+
+// Defensive binding: prevents total app death if one id is missing
+const on = (id, event, fn, opts) => {
+  const el = $(id);
+  if (!el) return false;
+  el.addEventListener(event, fn, opts);
+  return true;
+};
 
 function now() { return Date.now(); }
 
@@ -52,8 +60,7 @@ function fmtElapsed(hours){
   if(hours == null) return "—";
   if(hours < 1) return `${Math.max(0, Math.floor(hours*60))}分`;
   if(hours < 48) return `${hours.toFixed(1)}時間`;
-  const days = hours / 24;
-  return `${days.toFixed(1)}日`;
+  return `${(hours/24).toFixed(1)}日`;
 }
 
 function normalizeContacts(text){
@@ -61,7 +68,6 @@ function normalizeContacts(text){
     .split("\n")
     .map(s=>s.trim())
     .filter(Boolean);
-  // de-dup
   return Array.from(new Set(lines));
 }
 
@@ -70,19 +76,17 @@ function getProfile(){
   if(!p) return structuredClone(DEFAULTS.profile);
   return { ...structuredClone(DEFAULTS.profile), ...p };
 }
-function setProfile(p){
-  saveJson(STORE.profile, p);
-}
+function setProfile(p){ saveJson(STORE.profile, p); }
 
-function getHistory(){
-  return loadJson(STORE.history, []);
-}
+function getHistory(){ return loadJson(STORE.history, []); }
 function addHistory(type, title, meta = {}){
   const h = getHistory();
   h.unshift({
     id: crypto?.randomUUID?.() ?? String(Math.random()),
     at: now(),
-    type, title, meta
+    type,
+    title,
+    meta
   });
   saveJson(STORE.history, h.slice(0, 200));
 }
@@ -94,13 +98,15 @@ function log(line){
   el.textContent = `[${ts}] ${line}\n` + el.textContent;
 }
 
-// --- UI references
+// Views
 const views = {
   onboarding: $("viewOnboarding"),
   home: $("viewHome"),
   history: $("viewHistory"),
   settings: $("viewSettings"),
 };
+
+// Sheet
 const sheet = {
   root: $("alertSheet"),
   title: $("sheetTitle"),
@@ -114,33 +120,39 @@ const sheet = {
 
 function setTheme(theme){
   document.documentElement.dataset.theme = theme;
-  localStorage.setItem(STORE.theme, theme);
+  localeStorageSafeSet(STORE.theme, theme);
 }
 function initTheme(){
   const saved = localStorage.getItem(STORE.theme);
   if(saved){
-    setTheme(saved);
+    document.documentElement.dataset.theme = saved;
     return;
   }
   const prefersLight = window.matchMedia?.("(prefers-color-scheme: light)")?.matches;
-  setTheme(prefersLight ? "light" : "dark");
+  document.documentElement.dataset.theme = prefersLight ? "light" : "dark";
+  localStorage.setItem(STORE.theme, document.documentElement.dataset.theme);
+}
+function toggleTheme(){
+  const cur = document.documentElement.dataset.theme || "dark";
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem(STORE.theme, next);
 }
 
 function route(viewName){
-  for(const k of Object.keys(views)) hide(views[k]);
+  Object.values(views).forEach(hide);
   show(views[viewName]);
 }
 
 function isConfigured(profile){
-  // Minimal viable: threshold + at least one contact line (email-like or anything)
   const contacts = normalizeContacts(profile.contactsText);
   return Number(profile.thresholdHours) > 0 && contacts.length > 0;
 }
 
-// Status model (Demumu-like):
-// - OK: elapsed < 0.7 * threshold
-// - WARN: 0.7*threshold <= elapsed < threshold
-// - ALERT: elapsed >= threshold
+// Status model:
+// OK: elapsed < 0.7*threshold
+// WARN: 0.7*threshold <= elapsed < threshold
+// ALERT: elapsed >= threshold
 function computeStatus(profile){
   const th = Number(profile.thresholdHours || 24);
   const last = profile.lastCheckinAt;
@@ -162,31 +174,36 @@ function applyStatusToHome(profile){
   const elpEl = $("elapsed");
   const hint = $("homeHint");
 
-  lastEl.textContent = fmtDate(profile.lastCheckinAt);
-  elpEl.textContent = fmtElapsed(st.elapsedH);
+  if(lastEl) lastEl.textContent = fmtDate(profile.lastCheckinAt);
+  if(elpEl) elpEl.textContent = fmtElapsed(st.elapsedH);
+  if(label) label.textContent = st.label;
 
-  label.textContent = st.label;
+  if(dot){
+    dot.style.background =
+      st.level === "ok" ? "var(--ok)" :
+      st.level === "warn" ? "var(--warn)" :
+      st.level === "bad" ? "var(--bad)" :
+      "var(--muted)";
+  }
 
-  // set colors
-  dot.style.background = st.level === "ok" ? "var(--ok)"
-    : st.level === "warn" ? "var(--warn)"
-    : st.level === "bad" ? "var(--bad)"
-    : "var(--muted)";
+  if(pill){
+    pill.style.borderColor =
+      st.level === "ok" ? "rgba(54,211,153,.35)" :
+      st.level === "warn" ? "rgba(251,191,36,.35)" :
+      st.level === "bad" ? "rgba(251,113,133,.35)" :
+      "var(--stroke)";
+  }
 
-  pill.style.borderColor =
-    st.level === "ok" ? "rgba(109,255,156,.35)"
-    : st.level === "warn" ? "rgba(255,211,110,.35)"
-    : st.level === "bad" ? "rgba(255,92,122,.35)"
-    : "var(--stroke)";
-
-  if(st.level === "warn"){
-    hint.textContent = `そろそろ押してください（閾値 ${st.th}h）。このまま未チェックインだと通知が走ります。`;
-  }else if(st.level === "bad"){
-    hint.textContent = `閾値 ${st.th}h を超えています。通知が必要です。安全なら「いま押す」で復旧できます。`;
-  }else if(st.level === "none"){
-    hint.textContent = `最初のチェックインを行ってください。以後、押されない場合のみ通知が走ります。`;
-  }else{
-    hint.textContent = `いつ押してもOK。押されない場合のみ通知が走ります。`;
+  if(hint){
+    if(st.level === "warn"){
+      hint.textContent = `そろそろ押してください（閾値 ${st.th}h）。このまま未チェックインだと通知が走ります。`;
+    }else if(st.level === "bad"){
+      hint.textContent = `閾値 ${st.th}h を超えています。通知が必要です。安全なら「いま押す」で復旧できます。`;
+    }else if(st.level === "none"){
+      hint.textContent = `最初のチェックインを行ってください。以後、押されない場合のみ通知が走ります。`;
+    }else{
+      hint.textContent = `いつ押してもOK。押されない場合のみ通知が走ります。`;
+    }
   }
 
   renderContacts(profile);
@@ -198,42 +215,50 @@ function renderContacts(profile){
   const tagWebhook = $("tagWebhook");
 
   const contacts = normalizeContacts(profile.contactsText);
-  chips.innerHTML = "";
+
+  if(chips) chips.innerHTML = "";
+
   if(contacts.length === 0){
-    hint.textContent = "通知先が未設定です（設定から追加してください）";
+    if(hint) hint.textContent = "通知先が未設定です（設定から追加してください）";
   }else{
-    hint.textContent = `${contacts.length}件登録`;
-    for(const c of contacts.slice(0, 10)){
-      const div = document.createElement("div");
-      div.className = "chip";
-      div.textContent = c;
-      chips.appendChild(div);
-    }
-    if(contacts.length > 10){
-      const div = document.createElement("div");
-      div.className = "chip";
-      div.textContent = `+${contacts.length - 10}`;
-      chips.appendChild(div);
+    if(hint) hint.textContent = `${contacts.length}件登録`;
+    if(chips){
+      for(const c of contacts.slice(0, 10)){
+        const div = document.createElement("div");
+        div.className = "chip";
+        div.textContent = c;
+        chips.appendChild(div);
+      }
+      if(contacts.length > 10){
+        const div = document.createElement("div");
+        div.className = "chip";
+        div.textContent = `+${contacts.length - 10}`;
+        chips.appendChild(div);
+      }
     }
   }
 
-  if(profile.webhookUrl && profile.webhookUrl.trim()){
-    tagWebhook.textContent = "Webhook：設定済";
-    tagWebhook.style.borderColor = "rgba(110,231,255,.35)";
-  }else{
-    tagWebhook.textContent = "Webhook：未設定";
-    tagWebhook.style.borderColor = "var(--stroke)";
+  if(tagWebhook){
+    if(profile.webhookUrl && profile.webhookUrl.trim()){
+      tagWebhook.textContent = "Webhook：設定済";
+      tagWebhook.style.borderColor = "rgba(125,211,252,.35)";
+    }else{
+      tagWebhook.textContent = "Webhook：未設定";
+      tagWebhook.style.borderColor = "var(--stroke)";
+    }
   }
 }
 
 function openSheet({title, msg, meta, showWebhook}){
-  sheet.title.textContent = title;
-  sheet.msg.textContent = msg;
-  sheet.meta.textContent = meta || "";
+  if(sheet.title) sheet.title.textContent = title;
+  if(sheet.msg) sheet.msg.textContent = msg;
+  if(sheet.meta) sheet.meta.textContent = meta || "";
   show(sheet.root);
 
-  sheet.webhook.disabled = !showWebhook;
-  sheet.webhook.title = showWebhook ? "" : "Webhook未設定";
+  if(sheet.webhook){
+    sheet.webhook.disabled = !showWebhook;
+    sheet.webhook.title = showWebhook ? "" : "Webhook未設定";
+  }
 }
 function closeSheet(){ hide(sheet.root); }
 
@@ -275,7 +300,6 @@ function mailtoAll(profile, reason){
   }
   const { subject, body } = buildNotifyText(profile, reason);
 
-  // mailto: supports single "to" list separated by commas (not always reliable for many)
   const to = encodeURIComponent(contacts.join(","));
   const u = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.location.href = u;
@@ -293,8 +317,9 @@ async function postWebhook(profile, reason){
       meta: "",
       showWebhook: false
     });
-    return;
+    return false;
   }
+
   const payload = {
     app: "demumu-static",
     at: new Date().toISOString(),
@@ -341,9 +366,7 @@ function doCheckin(profile){
   applyStatusToHome(profile);
 
   if("Notification" in window && Notification.permission === "granted"){
-    new Notification("チェックイン完了", {
-      body: "今日の安全記録を更新しました。",
-    });
+    new Notification("チェックイン完了", { body: "今日の安全記録を更新しました。" });
   }
 }
 
@@ -351,8 +374,6 @@ function maybeFireWarningOrAlert(profile){
   const st = computeStatus(profile);
   const th = st.th;
 
-  // For accuracy, rely on periodic checks while app is open.
-  // When closed, cannot guarantee on static hosting (no server).
   if(st.level === "warn"){
     const already = profile.lastWarnAt && (now() - profile.lastWarnAt) < (6 * 60 * 60 * 1000);
     if(!already){
@@ -400,7 +421,10 @@ function maybeFireWarningOrAlert(profile){
 function renderHistory(){
   const list = $("historyList");
   const h = getHistory();
+  if(!list) return;
+
   list.innerHTML = "";
+
   if(h.length === 0){
     const div = document.createElement("div");
     div.className = "item";
@@ -412,11 +436,7 @@ function renderHistory(){
   for(const it of h){
     const div = document.createElement("div");
     div.className = "item";
-    const t = new Date(it.at);
-    const meta = [
-      fmtDate(it.at),
-      it.type
-    ].filter(Boolean).join(" • ");
+    const meta = [fmtDate(it.at), it.type].filter(Boolean).join(" • ");
     div.innerHTML = `
       <div>
         <div class="itemTitle">${escapeHtml(it.title)}</div>
@@ -438,26 +458,26 @@ function escapeHtml(s){
 }
 
 function syncSettingsUI(profile){
-  // Onboarding
   if($("obName")) $("obName").value = profile.name || "";
   if($("obThreshold")) $("obThreshold").value = String(profile.thresholdHours || 24);
   if($("obContacts")) $("obContacts").value = profile.contactsText || "";
 
-  // Settings
-  $("stName").value = profile.name || "";
-  $("stThreshold").value = String(profile.thresholdHours || 24);
-  $("stContacts").value = profile.contactsText || "";
-  $("stWebhook").value = profile.webhookUrl || "";
+  if($("stName")) $("stName").value = profile.name || "";
+  if($("stThreshold")) $("stThreshold").value = String(profile.thresholdHours || 24);
+  if($("stContacts")) $("stContacts").value = profile.contactsText || "";
+  if($("stWebhook")) $("stWebhook").value = profile.webhookUrl || "";
 
-  // Notifications state
   updateNotiState();
 }
 
 function updateNotiState(){
   const el = $("notiState");
+  const btn = $("btnEnableNoti");
+  if(!el) return;
+
   if(!("Notification" in window)){
     el.textContent = "このブラウザは通知に対応していません。";
-    $("btnEnableNoti").disabled = true;
+    if(btn) btn.disabled = true;
     return;
   }
   el.textContent = `通知権限：${Notification.permission}`;
@@ -498,19 +518,12 @@ async function importSettings(file){
   return p;
 }
 
-// --- App init / wiring
 function init(){
   initTheme();
 
-  const btnTheme = $("btnTheme");
-  btnTheme.addEventListener("click", () => {
-    const cur = document.documentElement.dataset.theme || "dark";
-    setTheme(cur === "dark" ? "light" : "dark");
-  });
-
   let profile = getProfile();
 
-  // First route
+  // Routes
   if(!isConfigured(profile)){
     route("onboarding");
   }else{
@@ -520,18 +533,22 @@ function init(){
   syncSettingsUI(profile);
   applyStatusToHome(profile);
 
-  // Top settings open
-  $("btnSettings").addEventListener("click", () => {
+  // Top actions
+  on("btnTheme", "click", (e) => { e.preventDefault(); toggleTheme(); });
+  on("btnSettings", "click", (e) => {
+    e.preventDefault();
     profile = getProfile();
     syncSettingsUI(profile);
     route("settings");
   });
 
   // Onboarding start
-  $("obStart").addEventListener("click", () => {
-    profile.name = $("obName").value.trim();
-    profile.thresholdHours = Number($("obThreshold").value || 24);
-    profile.contactsText = $("obContacts").value;
+  on("obStart", "click", (e) => {
+    e.preventDefault();
+    profile = getProfile();
+    profile.name = $("obName")?.value?.trim?.() ?? "";
+    profile.thresholdHours = Number($("obThreshold")?.value || 24);
+    profile.contactsText = $("obContacts")?.value ?? "";
     setProfile(profile);
     addHistory("setup", "初期設定完了", { thresholdHours: profile.thresholdHours });
     log("✨ 初期設定を完了しました");
@@ -539,68 +556,73 @@ function init(){
     applyStatusToHome(profile);
   });
 
-  // Home actions
-  $("btnCheckin").addEventListener("click", () => {
+  // Home
+  on("btnCheckin", "click", (e) => {
+    e.preventDefault();
     profile = getProfile();
     doCheckin(profile);
   });
 
-  $("btnHistory").addEventListener("click", () => {
+  on("btnHistory", "click", (e) => {
+    e.preventDefault();
     renderHistory();
     route("history");
   });
 
-  $("btnBackFromHistory").addEventListener("click", () => {
-    profile = getProfile();
-    route("home");
-    applyStatusToHome(profile);
-  });
-
-  $("btnClearHistory").addEventListener("click", () => {
-    saveJson(STORE.history, []);
-    log("🧹 履歴を消去しました");
-    renderHistory();
-  });
-
-  $("btnTestNotify").addEventListener("click", async () => {
+  on("btnTestNotify", "click", (e) => {
+    e.preventDefault();
     profile = getProfile();
     openSheet({
       title: "テスト通知",
-      msg: "通知の動作確認です。mail/ webhook を試せます。",
+      msg: "通知の動作確認です。mail / webhook を試せます。",
       meta: "",
       showWebhook: Boolean(profile.webhookUrl?.trim())
     });
   });
 
+  // History
+  on("btnBackFromHistory", "click", (e) => {
+    e.preventDefault();
+    profile = getProfile();
+    route("home");
+    applyStatusToHome(profile);
+  });
+
+  on("btnClearHistory", "click", (e) => {
+    e.preventDefault();
+    saveJson(STORE.history, []);
+    log("🧹 履歴を消去しました");
+    renderHistory();
+  });
+
   // Settings close
-  $("btnCloseSettings").addEventListener("click", () => {
+  on("btnCloseSettings", "click", (e) => {
+    e.preventDefault();
     profile = getProfile();
     route(isConfigured(profile) ? "home" : "onboarding");
     applyStatusToHome(profile);
   });
 
-  // Settings inputs
+  // Settings inputs autosave
   const saveSettings = () => {
     const p = getProfile();
-    p.name = $("stName").value.trim();
-    p.thresholdHours = Number($("stThreshold").value || 24);
-    p.contactsText = $("stContacts").value;
-    p.webhookUrl = $("stWebhook").value.trim();
+    p.name = $("stName")?.value?.trim?.() ?? "";
+    p.thresholdHours = Number($("stThreshold")?.value || 24);
+    p.contactsText = $("stContacts")?.value ?? "";
+    p.webhookUrl = $("stWebhook")?.value?.trim?.() ?? "";
     setProfile(p);
     applyStatusToHome(p);
     return p;
   };
 
   ["stName","stThreshold","stContacts","stWebhook"].forEach(id=>{
-    $(id).addEventListener("input", () => {
-      profile = saveSettings();
-    });
-    $(id).addEventListener("change", () => {
-      profile = saveSettings();
-    });
+    on(id, "input", () => { profile = saveSettings(); });
+    on(id, "change", () => { profile = saveSettings(); });
   });
 
-  $("btnEnableNoti").addEventListener("click", async () => {
+  // Notifications
+  on("btnEnableNoti", "click", async (e) => {
+    e.preventDefault();
     if(!("Notification" in window)) return;
     const perm = await Notification.requestPermission();
     addHistory("noti", "通知権限変更", { permission: perm });
@@ -608,12 +630,13 @@ function init(){
     updateNotiState();
   });
 
-  $("btnExport").addEventListener("click", () => {
-    profile = getProfile();
-    exportSettings(profile);
+  // Export / Import / Reset
+  on("btnExport", "click", (e) => {
+    e.preventDefault();
+    exportSettings(getProfile());
   });
 
-  $("fileImport").addEventListener("change", async (e) => {
+  on("fileImport", "change", async (e) => {
     const f = e.target.files?.[0];
     if(!f) return;
     profile = await importSettings(f);
@@ -623,39 +646,42 @@ function init(){
     e.target.value = "";
   });
 
-  $("btnResetAll").addEventListener("click", () => {
+  on("btnResetAll", "click", (e) => {
+    e.preventDefault();
     if(!confirm("全てのデータ（設定・履歴・チェックイン）を削除します。よろしいですか？")) return;
     localStorage.removeItem(STORE.profile);
     localStorage.removeItem(STORE.history);
-    addHistory("reset", "全リセット");
     log("🧹 全リセットしました");
     profile = getProfile();
     syncSettingsUI(profile);
     route("onboarding");
   });
 
-  // Alert sheet actions
-  sheet.close.addEventListener("click", closeSheet);
+  // Sheet actions
+  on("btnCloseSheet", "click", (e) => { e.preventDefault(); closeSheet(); });
 
-  sheet.checkin.addEventListener("click", () => {
+  on("btnSheetCheckin", "click", (e) => {
+    e.preventDefault();
     profile = getProfile();
     doCheckin(profile);
     closeSheet();
   });
 
-  sheet.mail.addEventListener("click", () => {
+  on("btnSheetMail", "click", (e) => {
+    e.preventDefault();
     profile = getProfile();
     mailtoAll(profile, "アプリ内トリガ（警告/通知/テスト）");
   });
 
-  sheet.webhook.addEventListener("click", async () => {
+  on("btnSheetWebhook", "click", async (e) => {
+    e.preventDefault();
     profile = getProfile();
     await postWebhook(profile, "アプリ内トリガ（警告/通知/テスト）");
   });
 
   // Escape closes sheet
   window.addEventListener("keydown", (e) => {
-    if(e.key === "Escape" && !sheet.root.hidden) closeSheet();
+    if(e.key === "Escape" && sheet.root && !sheet.root.hidden) closeSheet();
   });
 
   // Periodic monitor while app is open
@@ -663,19 +689,23 @@ function init(){
     const p = getProfile();
     maybeFireWarningOrAlert(p);
     applyStatusToHome(p);
-  }, 30_000); // 30 sec
+  }, 30_000);
 
-  // Initial monitor + status
+  // Initial monitor
   setTimeout(() => {
     const p = getProfile();
     maybeFireWarningOrAlert(p);
     applyStatusToHome(p);
   }, 900);
 
-  // If user hasn't checked in yet, keep a gentle prompt in log
   if(!profile.lastCheckinAt){
     log("ℹ 最初のチェックインをしてください。以後、押されない場合のみ通知が走ります。");
   }
+}
+
+function setTheme(theme){
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(STORE.theme, theme);
 }
 
 document.addEventListener("DOMContentLoaded", init);
