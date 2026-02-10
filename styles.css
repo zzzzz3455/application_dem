@@ -44,6 +44,9 @@
   --focus: 0 0 0 6px rgba(96,165,250,.20);
 }
 
+/* ★修正: hidden属性が効くように強制する */
+[hidden] { display: none !important; }
+
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
@@ -343,6 +346,7 @@ textarea{ resize: vertical; min-height: 108px; }
   padding: 18px;
   background: rgba(0,0,0,.58);
   backdrop-filter: blur(10px);
+  z-index: 9999; /* ★修正: 最前面に配置 */
 }
 .sheetCard{
   width: min(640px, 100%);
